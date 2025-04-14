@@ -9,3 +9,9 @@ Unfinished
 - support policy json file as argument
 - support IPv6
 - support other cloud providers
+
+## Dependencies
+```
+boto3
+fortigate-api
+```
