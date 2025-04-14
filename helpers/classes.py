@@ -1,8 +1,7 @@
-#todo get services
-
+import ipaddress
 import fortigate_api
 from helpers import loadAPI
-import ipaddress
+
 
 #policy object from the firewall with methods to return the sources, destinations, and service from the API
 class Policy:
