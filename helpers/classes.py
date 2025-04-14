@@ -91,8 +91,19 @@ class Policy:
                     network = ipaddress.IPv4Network(f"{ip_current}/32") #make a network so we can add the CIDR below
                     addressCIDRs.append(network.with_prefixlen) #fake the CIDR since each is a host
 
+        addressCIDRs = self._cleanCIDRs(addressCIDRs) #check to see if any CIDRs are eclipsed, only return bigger ones
         return addressCIDRs #return the list of CIDRs
     
+    def _cleanCIDRs(self, CIDRlist): #check list of CIDRs to see if any are eclipsed, remove eclipsed one
+        networks = [ipaddress.ip_network(cidr) for cidr in CIDRlist] #create a list of network objects
+        result = []
+
+        for network in networks: #step through each network and see if it is contained in other networks, if not, add to results
+            if not any(other != network and other.supernet_of(network) for other in networks):
+                result.append(str(network))
+        
+        return result
+        
 class Service: 
     def __init__(self, serviceName):
         self.api = loadAPI.createAPI()
