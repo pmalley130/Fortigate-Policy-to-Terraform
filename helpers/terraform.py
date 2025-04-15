@@ -3,9 +3,8 @@ import terrascript.provider as provider
 import terrascript.resource as resource
 from helpers.classes import Policy, Service
 
-def generate_AWS_security_group(
+def generateAWSsecurityGroup(
     policy: Policy,
-    region = "us-east-1",
     vpc = None,
     output_file = None
 ):
