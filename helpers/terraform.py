@@ -11,7 +11,6 @@ def generate_AWS_security_group(
 ):
     #initialize terraform config
     config = terrascript.Terrascript()
-    config += provider.aws(region=region)
 
     ingressRules = [] #empty list to put service objects into
     for svc in policy.getServices(): #step through each service in the policy and add it to security group
@@ -20,14 +19,23 @@ def generate_AWS_security_group(
             "to_port": svc.to_port,
             "protocol": svc.ip_protocol,
             "cidr_blocks": policy.getSources(),
+            "ipv6_cidr_blocks": [],
+            "prefix_list_ids": [],
+            "security_groups": [],
+            "self" : "false",
             "description": f"{svc.name}"
         })
 
     egressRules = [{ #assume egressRules always allow all out since it's stateful
-        "from_port": 0,
-        "to_port": 0,
+        "from_port": "0",
+        "to_port": "0",
         "protocol": "-1",
-        "cidr_blocks": "0.0.0.0/0"
+        "cidr_blocks": ["0.0.0.0/0"],
+        "ipv6_cidr_blocks": [],
+        "prefix_list_ids": [],
+        "security_groups": [],
+        "self" : "false",
+        "description": f"{svc.name}"
     }]
 
     sg = resource.aws_security_group( #build security group
