@@ -108,7 +108,7 @@ class Service:
         self.api = loadAPI.createAPI()
         call_results = self.api.cmdb.firewall_service.custom.get(name=serviceName) #make API call for service by name
         if call_results: #if not empty, assign the needed variables to the first API result
-            first = call_results[0] #API likes to return a list, but it's always got one object - pretty much any time we directly use the API in here we're going to want to use the first index
+            first = call_results[0]
             
             #set values for service
             self.name = first.get('name')
@@ -118,7 +118,7 @@ class Service:
             elif(first.get('udp-portrange')):#same for udp
                 self.ip_protocol = "udp"
         
-            #if there's a "-" in it it's a port range, otherwise just set from_port (keeping terraform AWS convention)           
+            #if there's a "-" in it it's a port range, otherwise just set from_port and to_port to the same(keeping terraform AWS convention)           
             ports = first.get(f"{self.ip_protocol}-portrange")
             if "-" in ports:
                 from_port, to_port = map(int, ports.split('-'))
