@@ -6,7 +6,7 @@ Scripts to convert a Fortigate firewall policy to Network Security Groups. Sever
 - Region is set by environment
 
 ## To-do
-- check all CIDRs for VPCs and created separate sgs instead of checking for first one
+- check all CIDRs for VPCs and create separate sgs instead of checking for first one
 - logic to handle any/all object in source/destination of rule
 - get egress rule from vpc and copy/recreate them instead of defaulting to allow all
 - if no environment, ask for missing details at runtime
