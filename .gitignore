@@ -179,3 +179,4 @@ load.py
 
 #json files used for testing
 *.json
+sgs.txt

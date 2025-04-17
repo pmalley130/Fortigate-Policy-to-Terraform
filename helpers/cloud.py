@@ -1,9 +1,9 @@
 from dotenv import load_dotenv
-import boto3
 import ipaddress
 
 #function to search all VPCs for a CIDR and return the VPCid of a match
-def findAWSVPCbyCIDR(inputCIDR):
+def findVPCbyCIDR(inputCIDR):
+    import boto3
     load_dotenv() #needed for reading AWS creds from environment file
 
     #convert CIDR str to network object
@@ -25,4 +25,16 @@ def findAWSVPCbyCIDR(inputCIDR):
                     return vpc['VpcId']
             except ValueError:
                 continue
-    return None #if no VPCs match then return None
+
+#function to search all VPCs by ID and to get the name tag
+def getVPCName(vpcID):
+    import boto3
+    load_dotenv() #needed for reading AWS creds from environment file
+    
+    ec2 = boto3.client('ec2') #build connection to aws
+    response = ec2.describe_vpcs(VpcIds=[vpcID]) #only grab the VPC we want
+    VPCs = response.get("Vpcs", []) #only search through the info we want
+
+    for tag in VPCs[0].get("Tags", []): #grab the tags and look for name
+        if tag["Key"] == "Name":
+            return tag["Value"]
