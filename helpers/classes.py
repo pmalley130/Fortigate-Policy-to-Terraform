@@ -1,6 +1,7 @@
 import ipaddress
 import fortigate_api
 from helpers import loadAPI
+from helpers.cloud import findVPCbyCIDR
 
 
 #policy object from the firewall with methods to return the sources, destinations, and service from the API
@@ -15,8 +16,13 @@ class Policy:
             self.srcaddr = first.get('srcaddr')
             self.service = first.get('service')
             self.comments = first.get('comments')
-        else:
-            raise ValueError (f"No policy {policyName} from API")
+            self.VPCs = []
+            for destination in self.getDestinations():
+                vpc = findVPCbyCIDR(destination)
+                if vpc and vpc not in self.VPCs: #add VPC to list if found and not already in list
+                    self.VPCs.append(vpc)
+                if not self.VPCs:
+                    print("No matching VPC found - will attempt to generate but vpc ID will be 'none'")
 
     def __str__(self):
         return f"{self.name}"

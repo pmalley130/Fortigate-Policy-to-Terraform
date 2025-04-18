@@ -6,7 +6,6 @@ Scripts to convert a Fortigate firewall policy to Network Security Groups. Sever
 - Region is set by environment
 
 ## To-do
-- logic for boto3 creation
 - logic for CLI creation
 - refactor into creating json to describe sg and rules
 - options in main to choose between tf, boto3, and CLI
