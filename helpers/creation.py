@@ -59,7 +59,6 @@ def createRules(policy, type): #create inbound and outbound rules to attach to s
                 }]
 
         case "cli": #for cli
-            ingressRules = []
             for svc in policy.getServices():
                 ingressRules.append({
                     "from_port":svc.from_port,
@@ -103,18 +102,30 @@ def generateAWS_CLI(
             f'VPC_ID="{vpc}"',
             f'FIREWALL_POLICY_NAME="{policy.name}"',
             "",
-            f'echo "Creating security group for {vpc}"', #make the group
-            'GROUP_ID=$(aws ec2 create-security-group \\',
-            '  --group-name "$GROUP_NAME" \\',
-            '  --description "$DESCRIPTION" \\',
-            '  --vpc-id "$VPC_ID" \\',
-            "  --query 'GroupId' \\",
+            f'#Check for existing security group {sg_name}, if exists, save to id GROUP_ID', #check for existing sg
+            'GROUP_ID=$(aws ec2 describe-security-groups \\',
+            '  --filters Name=group-name,Values="$GROUP_NAME" Name=vpc-id,Values="$VPC_ID" \\',
+            '  --query "SecurityGroups[0].GroupId" \\',
             '  --output text)',
             "",
-            'echo "Tagging new security group "$GROUP_ID"..."', #tag the group
-            'aws ec2 create-tags \\',
-            '  --resources "$GROUP_ID" \\',
-            '  --tags Key=firewall_policy:name,Value="$FIREWALL_POLICY_NAME"',
+            'if [[ "$GROUP_ID" == "None" ]]; then', #if sg exists..
+            f'  #Security group {sg_name} not found in {vpc}, so creating and tagging one',
+            f'  echo "Creating security group for {vpc}"', #make the group
+            '  GROUP_ID=$(aws ec2 create-security-group \\',
+            '    --group-name "$GROUP_NAME" \\',
+            '    --description "$DESCRIPTION" \\',
+            '    --vpc-id "$VPC_ID" \\',
+            "    --query 'GroupId' \\",
+            '    --output text)',
+            "",
+            '  #Tag new group',
+            '  echo "Tagging new security group "$GROUP_ID"..."', #tag the group
+            '  aws ec2 create-tags \\',
+            '    --resources "$GROUP_ID" \\',
+            '    --tags Key=firewall_policy:name,Value="$FIREWALL_POLICY_NAME"',
+            "else",
+            f'  echo "Found security group {sg_name} in {vpc} with ID: $GROUP_ID"', #state that group exists
+            'fi',
             "",
             'echo "adding ingress rules"'
         ]
@@ -131,6 +142,7 @@ def generateAWS_CLI(
             bash += [
                 "",
                 f'#Rules for {rule["description"]}',
+                '#pipe the output to see how many rules are created - full output is way too large',
                 f'echo "Creating rules for {rule["description"]}"', #apply the rules
                 'SG_OUT=$(aws ec2 authorize-security-group-ingress \\',
                 '  --group-id "$GROUP_ID" \\',
