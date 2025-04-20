@@ -190,29 +190,40 @@ def createAWSbyAPI(
             sg_name = f"{policy.name}_{vpc}"
 
         if not writeOut:
-            response = ec2.create_security_group( #create new security group to place rules in based on VPC
-                GroupName = sg_name,
-                Description = f"Security group for policy {policy.name}, built from firewall",
-                VpcId = vpc,
-                TagSpecifications=[
-                    {
-                        'ResourceType':'security-group',
-                        'Tags': [
-                            {
-                                'Key':'firewall_policy',
-                                'Value': policy.name
-                            }
-                        ]
-                    }
+            response = ec2.describe_security_groups( #look for a security group in this vpc with the same name
+                Filters = [
+                    {'Name': 'group-name', 'Values':[sg_name]},
+                    {'Name': 'vpc-id', 'Values': [vpc]}
                 ]
             )
+            if response['SecurityGroups']:
+                SGid = response['SecurityGroups'][0]['GroupId'] #if matching security group is found, save its ID for use in rules
+                print(f"Found security group {sg_name} in {vpc} with ID {SGid}; using for rule placement")
+            else:
+                response = ec2.create_security_group( #create new security group to place rules in based on VPC
+                    GroupName = sg_name,
+                    Description = f"Security group for policy {policy.name}, built from firewall",
+                    VpcId = vpc,
+                    TagSpecifications=[
+                        {
+                            'ResourceType':'security-group',
+                            'Tags': [
+                                {
+                                    'Key':'firewall_policy',
+                                    'Value': policy.name
+                                }
+                            ]
+                        }
+                    ]
+                )
+                SGid = response['GroupId'] #get the sg ID now that it's created, for use in attaching rule set
+                print(f"Created new Security Group {SGid} with name {sg_name}")
 
-            SGid = response['GroupId'] #get the sg ID now that it's created, for use in attaching rule set
-            print(f"Created new Security Group {SGid} with name {sg_name}")
-            ec2.authorize_security_group_ingress(
+            response = ec2.authorize_security_group_ingress( #create ingress rules
                 GroupId = SGid,
                 IpPermissions = ingressRules
             )
+            print(f"Created ingress rules for {SGid}")
 
             #can't duplicate egress rules, default allow all exists - keeping it here for later functionality
             #ec2.authorize_security_group_egress(
@@ -222,9 +233,9 @@ def createAWSbyAPI(
 
         if writeOut:
             import json
-            print(f"Printing simulated output for NEW security group {sg_name}")
+            print(f"Printing simulated output for security group {sg_name}")
             print(f"Ingress rules: {json.dumps(ingressRules, indent=5)}")
-            print(f"Egress rules {json.dumps(ingressRules, indent=5)}")
+            print(f"Egress rules {json.dumps(egressRules, indent=5)}")
 
 
 def generateAWS_TF(

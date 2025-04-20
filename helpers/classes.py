@@ -8,6 +8,7 @@ from helpers.cloud import findVPCbyCIDR
 class Policy:
     def __init__(self, policyName):
         self.api = loadAPI.createAPI()
+        print(f"Loading policy {policyName} from firewall.")
         call_results = self.api.cmdb.firewall.policy.get(filter=f'"name=={policyName}"') #make API call for policy by name
         if call_results: #if not empty, assign the needed variables to the first API result
             first = call_results[0] #API likes to return a list, but it's always got one object - pretty much any time we directly use the API in here we're going to want to use the first index
@@ -23,7 +24,6 @@ class Policy:
                     self.VPCs.append(vpc)
                 if not self.VPCs:
                     print("No matching VPC found - will attempt to generate but vpc ID will be 'none'")
-
     def __str__(self):
         return f"{self.name}"
 

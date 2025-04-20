@@ -6,7 +6,6 @@ Scripts to convert a Fortigate firewall policy to Network Security Groups. Sever
 - Region is set by environment
 
 ## To-do
-- add logic for checking if sg exists in api version
 - take arguments in main for creation type (-tf; -api; -cli, policy name)
 - refactor into creating json to describe sg and rules
 - logic to handle any/all object in source/destination of rule
