@@ -1,11 +1,10 @@
 from helpers.classes import Policy
-from helpers.cloud import findVPCbyCIDR
-from helpers.creation import generateAWS_TF, createAWSbyAPI
+from helpers.creation import createAWSbyAPI, generateAWS_TF
 
 policyName = input("Enter the name of the firewall policy: ") #ask for policy name for use in API call
 policy = Policy(policyName) #create said policy
 
-choice = input(f"Choose your method: \n 1. Generate Terraform JSON \n 2. Create by AWS API\n") 
+choice = input("Choose your method: \n 1. Generate Terraform JSON \n 2. Create by AWS API\n")
 
 #define methods used by choices
 def choseTF(policy):
@@ -26,7 +25,7 @@ def choseAPI(policy):
         writeOut = None
     else:
          writeOut = outputConsole
-         
+
     createAWSbyAPI(policy, writeOut)
 
 match choice:

@@ -1,6 +1,7 @@
-from fortigate_api import FortiGateAPI
 import os
+
 from dotenv import load_dotenv
+from fortigate_api import FortiGateAPI
 
 load_dotenv()
 

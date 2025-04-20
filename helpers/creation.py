@@ -1,8 +1,9 @@
-from helpers.classes import Policy, Service
+from helpers.classes import Policy
+
 
 def createRules(policy, type): #create inbound and outbound rules to attach to security group
     ingressRules = [] #empty list to put service objects into
-    
+
     match type: # of course TF, CLI, and boto3 all have different formatting issues
         case "tf": #for terraform
             for svc in policy.getServices(): #step through each service in the policy and add it to security group
@@ -56,7 +57,7 @@ def createRules(policy, type): #create inbound and outbound rules to attach to s
                     "Ipv6Ranges": [],
                     "PrefixListIds": [],
                 }]
-    
+
     return ingressRules, egressRules
 
 def createAWSbyCLI(
@@ -69,17 +70,18 @@ def createAWSbyAPI(
         policy: Policy,
         writeOut = None,
 ):
-    import boto3 #package for AWS API
-    from helpers.cloud import findVPCbyCIDR, getVPCName #needed so rule CIDRs only match their VPC
-    
+    import boto3  #package for AWS API
+
+    from helpers.cloud import getVPCName  #needed so rule CIDRs only match their VPC
+
     ec2 = boto3.client('ec2')
 
     ingressRules, egressRules = createRules(policy, "api") #no matter the VPC the source rules will be the same so make them before the loop
-    
+
     for vpc in policy.VPCs: #step through VPCs identified for rule
         vpcName = getVPCName(vpc) #we want unique sg names, so append the vpcID to the policy name (or use the VPCid if no name)
         if vpcName:
-            sg_name = f"{policy.name}_{vpcName}" 
+            sg_name = f"{policy.name}_{vpcName}"
         else:
             sg_name = f"{policy.name}_{vpc}"
 
@@ -113,7 +115,7 @@ def createAWSbyAPI(
             #    GroupId = SGid,
             #    IpPermissions = egressRules
             #)
-        
+
         if writeOut:
             import json
             print(f"Printing simulated output for NEW security group {sg_name}")
@@ -125,22 +127,21 @@ def generateAWS_TF(
     policy: Policy,
     output_file = None
 ):
-    from helpers.cloud import findVPCbyCIDR, getVPCName #needed so rule CIDRs only match their VPC
-    #initialize terraform config
     import terrascript
-    import terrascript.provider as provider
-    import terrascript.resource as resource
+    from terrascript import resource
+
+    from helpers.cloud import getVPCName  #needed so rule CIDRs only match their VPC
     config = terrascript.Terrascript()
 
     ingressRules, egressRules = createRules(policy, "tf") #no matter the VPC the source rules will be the same so make them before the loop
-    
+
     for vpc in policy.VPCs:
         vpcName = getVPCName(vpc) #terrascript requires unique sg names, so append the vpcID to the policy name (or use the VPCid if no name)
         if vpcName:
-            sg_name = f"{policy.name}_{vpcName}" 
+            sg_name = f"{policy.name}_{vpcName}"
         else:
             sg_name = f"{policy.name}_{vpc}"
-        
+
         sg = resource.aws_security_group( #build security group
             sg_name,
             name = policy.name,
