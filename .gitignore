@@ -169,6 +169,7 @@ cython_debug/
 
 # Ruff stuff:
 .ruff_cache/
+ruff.toml
 
 # PyPI configuration file
 .pypirc
@@ -180,3 +181,4 @@ load.py
 #json files used for testing
 *.json
 sgs.txt
+*.sh
