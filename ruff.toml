@@ -1,5 +1,0 @@
-target-version = "py311"
-line-length = 88
-lint.select = ["I", "B", "E", "F", "UP", "S", "W", "PL"]  # Add rulesets here
-exclude = ["./playground.py", ".git"]
-lint.ignore = ["E501"]
