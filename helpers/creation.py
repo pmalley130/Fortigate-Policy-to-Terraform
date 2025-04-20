@@ -83,10 +83,6 @@ def generateAWS_CLI(
     bash = [ #start bash file with shebang and nl
         "#!/usr/bin/env bash",
         "",
-        "#NOTE: Due to CLI limitations, ingress rules created in this method cannot have descriptions.",
-        "#Instead, descriptions will be in the bash file for documentation",
-        "#Using TF or API will allow for descriptions viewable in the AWS Web Gui",
-        ""
     ]
 
     ingressRules, egressRules = createRules(policy, "cli") #make ingress and egress rules in the format needed for bash
@@ -100,14 +96,14 @@ def generateAWS_CLI(
 
         description = f"Security group for policy {policy.name}, built from firewall"
 
-        bash += [ #add the lines needed for the bash script - first we make the security group so it can be referenced in actual rule
-            f'#SECURITY GROUP CONFIGURATION FOR {vpcName}',
+        bash += [ #add the lines needed for the bash script - first we make the security group so it can be referenced in actual rules
+            f'#SECURITY GROUP CONFIGURATION FOR {vpcName}', #set the variables
             f'GROUP_NAME="{sg_name}"',
             f'DESCRIPTION="{description}"',
             f'VPC_ID="{vpc}"',
             f'FIREWALL_POLICY_NAME="{policy.name}"',
             "",
-            f'echo "Creating security group for {vpc}"',
+            f'echo "Creating security group for {vpc}"', #make the group
             'GROUP_ID=$(aws ec2 create-security-group \\',
             '  --group-name "$GROUP_NAME" \\',
             '  --description "$DESCRIPTION" \\',
@@ -115,7 +111,7 @@ def generateAWS_CLI(
             "  --query 'GroupId' \\",
             '  --output text)',
             "",
-            'echo "Tagging new security group "$GROUP_ID"..."',
+            'echo "Tagging new security group "$GROUP_ID"..."', #tag the group
             'aws ec2 create-tags \\',
             '  --resources "$GROUP_ID" \\',
             '  --tags Key=firewall_policy:name,Value="$FIREWALL_POLICY_NAME"',
@@ -124,22 +120,24 @@ def generateAWS_CLI(
         ]
 
         for rule in ingressRules:
-            ipRanges = [{"CidrIp":cidr, "Description":rule["description"]} for cidr in rule["cidrs"]]
+            ipRanges = [{"CidrIp":cidr, "Description":rule["description"]} for cidr in rule["cidrs"]] #generate the rules
             ipPermission = {
                 "IpProtocol":rule["protocol"],
                 "FromPort":rule["from_port"],
                 "ToPort":rule["to_port"],
                 "IpRanges":ipRanges
             }
-            ipPermissionJSON = json.dumps([ipPermission])
+            ipPermissionJSON = json.dumps([ipPermission]) #--ipPermission needs a json object, so explode it
             bash += [
                 "",
-                f'#Rule for {rule["description"]}',
-                'aws ec2 authorize-security-group-ingress \\',
+                f'#Rules for {rule["description"]}',
+                f'echo "Creating rules for {rule["description"]}"', #apply the rules
+                'SG_OUT=$(aws ec2 authorize-security-group-ingress \\',
                 '  --group-id "$GROUP_ID" \\',
                 f"  --ip-permissions '{ipPermissionJSON}' \\",
-                "  --query 'SecurityGroupRules[*].SecurityGroupRuleId' \\",
-                '  --output text'
+                "  --query 'SecurityGroupRules | length(@)' \\",
+                '  --output text)',
+                'echo "$SG_OUT rules created"'
             ]
 
         #bash += [ can't remake egress allow all if it already exists
@@ -154,8 +152,11 @@ def generateAWS_CLI(
         bash += [""]
 
 
-    with open("scripttest.sh", "w", newline="\n") as f: #write the bash script
-        f.write("\n".join(bash))
+    if output_file:
+        with open(output_file, "w", newline="\n") as f: #write the bash script
+            f.write("\n".join(bash))
+    else:
+        print('\n'.join(bash)) #print every line on new line
 
 def createAWSbyAPI(
         policy: Policy,
