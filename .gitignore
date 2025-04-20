@@ -178,7 +178,7 @@ ruff.toml
 playground.py
 load.py
 
-#json files used for testing
+#json files used for testing, outputs
 *.json
 sgs.txt
 *.sh
