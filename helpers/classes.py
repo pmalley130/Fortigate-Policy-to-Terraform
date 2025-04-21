@@ -4,7 +4,8 @@ from helpers import loadAPI
 from helpers.cloud import findVPCbyCIDR
 
 
-#policy object from the firewall with methods to return the sources, destinations, and service from the API
+#policy object from the firewall with methods to return the sources, destinations, services from the firewall api
+#also creates Policy.SG_JSON as a JSON file readable by most AWS integrations to create a network security group based on its sources, destinations, and services
 class Policy:
     def __init__(self, policyName):
         self.api = loadAPI.createAPI()
@@ -18,12 +19,13 @@ class Policy:
             self.service = first.get('service')
             self.comments = first.get('comments')
             self.VPCs = []
-            for destination in self.getDestinations():
+            for destination in self.getDestinations():  #check VPCs to see if any policy destinations match their networks - security groups will be applied to these VPCs
                 vpc = findVPCbyCIDR(destination)
-                if vpc and vpc not in self.VPCs: #add VPC to list if found and not already in list
+                if vpc and vpc not in self.VPCs:
                     self.VPCs.append(vpc)
                 if not self.VPCs:
                     print("No matching VPC found - will attempt to generate but vpc ID will be 'none'")
+            self.SG_JSON = self._generateJSON()
     def __str__(self):
         return f"{self.name}"
 
@@ -108,6 +110,52 @@ class Policy:
                 result.append(str(network))
 
         return result
+
+    def _generateJSON(self):
+        from helpers.cloud import getVPCName
+
+        description = f"Security group for policy {self.name}, built from firewall"
+
+        #build ingress rules (will be same for each vpc)
+        ingressRules = []
+        for svc in self.getServices():
+            IpRanges=[ #build inner objects for IpRanges
+                {
+                    'CidrIp': cidr,
+                    'Description': svc.name
+                } for cidr in self.getSources()
+            ]
+
+            ingressRules.append({#whole rule to append to security group
+                'IpProtocol': svc.ip_protocol,
+                'FromPort': svc.from_port,
+                'ToPort': svc.to_port,
+                'IpRanges': IpRanges
+            })
+
+        #build security group (per vpc)
+        SG_JSON = []
+        for vpc in self.VPCs:
+            vpcName = getVPCName(vpc) #we want unique SG names so append vpc name to fw policy name (or vpc ID if name doesn't exist)
+            if vpcName:
+                sgName = f"{self.name}_{vpcName}"
+            else:
+                sgName = f"{self.name}_{vpc}"
+
+            SGobj = { #json object for security group
+                'GroupName': sgName,
+                'Description': description,
+                'VpcId': vpc,
+                'Tags': [ #custom tag firewwall_policy with policy name, and name is sgName
+                    {'Key': 'firewall_policy', 'Value': self.name},
+                    {'Key': 'Name', 'Value': sgName}
+                ],
+                'IpPermissions': ingressRules
+            }
+            SG_JSON.append(SGobj) #add the security group to object
+
+        return SG_JSON
+
 
 class Service:
     def __init__(self, serviceName):
