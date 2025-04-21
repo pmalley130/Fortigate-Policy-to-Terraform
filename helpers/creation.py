@@ -1,276 +1,163 @@
-from helpers.classes import Policy
-
-
-def createRules(policy, type): #create inbound and outbound rules to attach to security group
-    ingressRules = [] #empty list to put service objects into
-
-    match type: # of course TF, CLI, and boto3 all have different formatting issues
-        case "tf": #for terraform
-            for svc in policy.getServices(): #step through each service in the policy and add it to security group
-                ingressRules.append({
-                    "from_port" : svc.from_port,
-                    "to_port": svc.to_port,
-                    "protocol": svc.ip_protocol,
-                    "cidr_blocks": policy.getSources(),
-                    "ipv6_cidr_blocks": [],
-                    "prefix_list_ids": [],
-                    "security_groups": [],
-                    "self" : "false",
-                    "description": f"{svc.name}"
-                })
-
-                egressRules = [{ #assume egressRules always allow all out since it's stateful
-                    "from_port": "0",
-                    "to_port": "0",
-                    "protocol": "-1",
-                    "cidr_blocks": ["0.0.0.0/0"],
-                    "ipv6_cidr_blocks": [],
-                    "prefix_list_ids": [],
-                    "security_groups": [],
-                    "self" : "false",
-                    "description": f"{svc.name}"
-                }]
-
-        case "api": #for boto3
-            for svc in policy.getServices(): #step through each service in the policy and add it to security group
-                rangeList = [] #empty list to add source objects to
-                for source in policy.getSources(): #each CIDR block needs its own description
-                    rangeList.append({
-                        'CidrIp': source,
-                        'Description': svc.name
-                    })
-
-                ingressRules.append({
-                    "FromPort" : svc.from_port,
-                    "ToPort": svc.to_port,
-                    "IpProtocol": svc.ip_protocol,
-                    "IpRanges": rangeList,
-                    "Ipv6Ranges": [],
-                    "PrefixListIds": [],
-                })
-
-                egressRules = [{ #assume egressRules always allow all out since it's stateful
-                    "FromPort": 0,
-                    "ToPort": 0,
-                    "IpProtocol": "-1",
-                    "IpRanges": [{'CidrIp' : "0.0.0.0/0"}],
-                    "Ipv6Ranges": [],
-                    "PrefixListIds": [],
-                }]
-
-        case "cli": #for cli
-            for svc in policy.getServices():
-                ingressRules.append({
-                    "from_port":svc.from_port,
-                    "to_port":svc.to_port,
-                    "protocol":svc.ip_protocol,
-                    "cidrs":policy.getSources(),
-                    "description":f"{svc.name}"
-                })
-            egressRules = []
-
-    return ingressRules, egressRules
-
-def generateAWS_CLI(
-        policy: Policy,
-        output_file = None
-):
+def generateAWS_CLI(SG_JSON):
     import json
 
-    from helpers.cloud import getVPCName
-
-    bash = [ #start bash file with shebang and nl
+    bash = [ #start bash file with shebang error settings
         "#!/usr/bin/env bash",
         "",
+        "set -euo pipefail",
     ]
 
-    ingressRules, egressRules = createRules(policy, "cli") #make ingress and egress rules in the format needed for bash
+    rulesFile = "IpPermissions.json"
 
-    for vpc in policy.VPCs:
-        vpcName = getVPCName(vpc) #we want unique sg names, so append the vpcID to the policy name (or use the VPCid if no name)
-        if vpcName:
-            sg_name = f"{policy.name}_{vpcName}"
-        else:
-            sg_name = f"{policy.name}_{vpc}"
+    for i, sg in enumerate(SG_JSON):
+        groupName = sg['GroupName']
+        description = sg['Description'].replace('"','\\".')
+        vpcID = sg['VpcId']
 
-        description = f"Security group for policy {policy.name}, built from firewall"
+        #AWS CLI is particular about passing tag specifications so we do some weird stuff here
+        tagSpecs = formatTagSpecifications(sg['Tags'])
 
-        bash += [ #add the lines needed for the bash script - first we make the security group so it can be referenced in actual rules
-            f'#SECURITY GROUP CONFIGURATION FOR {vpcName}', #set the variables
-            f'GROUP_NAME="{sg_name}"',
-            f'DESCRIPTION="{description}"',
-            f'VPC_ID="{vpc}"',
-            f'FIREWALL_POLICY_NAME="{policy.name}"',
+        if i == 0:
+             #Write rules JSON file, reused in each SG so write once
+            rulesData = {"IpPermissions": sg['IpPermissions']}
+            with open(rulesFile, 'w') as rf:
+                json.dump(rulesData, rf, indent=2)
+            print(f"Ingress rules JSON written to {rulesFile}")
+
+
+        bash += [
+            f"echo \"Processing security group {groupName}\"",
+            "SG_ID=$(aws ec2 describe-security-groups \\", #attempt to find existing security group
+            f"--filters Name=group-name,Values={groupName} Name=vpc-id,Values={vpcID} \\",
+            "--query 'SecurityGroups[0].GroupId' --output text || true)",
             "",
-            f'#Check for existing security group {sg_name}, if exists, save to id GROUP_ID', #check for existing sg
-            'GROUP_ID=$(aws ec2 describe-security-groups \\',
-            '  --filters Name=group-name,Values="$GROUP_NAME" Name=vpc-id,Values="$VPC_ID" \\',
-            '  --query "SecurityGroups[0].GroupId" \\',
-            '  --output text)',
-            "",
-            'if [[ "$GROUP_ID" == "None" ]]; then', #if sg exists..
-            f'  #Security group {sg_name} not found in {vpc}, so creating and tagging one',
-            f'  echo "Creating security group for {vpc}"', #make the group
-            '  GROUP_ID=$(aws ec2 create-security-group \\',
-            '    --group-name "$GROUP_NAME" \\',
-            '    --description "$DESCRIPTION" \\',
-            '    --vpc-id "$VPC_ID" \\',
-            "    --query 'GroupId' \\",
-            '    --output text)',
-            "",
-            '  #Tag new group',
-            '  echo "Tagging new security group "$GROUP_ID"..."', #tag the group
-            '  aws ec2 create-tags \\',
-            '    --resources "$GROUP_ID" \\',
-            '    --tags Key=firewall_policy:name,Value="$FIREWALL_POLICY_NAME"',
+            "if [ \"$SG_ID\" == \"None\" ] || [ -z \"$SG_ID\" ]; then", #if we don't find the  group
+            f"  echo \"Creating security group {groupName}\"",
+            "  SG_ID=$(aws ec2 create-security-group \\", #create new group
+            f"--group-name \"{groupName}\" \\",
+            f"--description \"{description}\" \\",
+            f"--vpc-id {vpcID} \\",
+            f"--tag-specifications {tagSpecs} \\",
+            "--query 'GroupId' --output text)",
             "else",
-            f'  echo "Found security group {sg_name} in {vpc} with ID: $GROUP_ID"', #state that group exists
-            'fi',
+            f"  echo \"Re-using existing security group {groupName} (ID: $SG_ID)\"",#otherwise re-use existing
+            "fi",
             "",
-            'echo "adding ingress rules"'
+            "echo \"Attaching ingress rules to $SG_ID\"", #attach rules file to new SG
+            "RESPONSE=$(aws ec2 authorize-security-group-ingress \\",
+            "--group-id $SG_ID \\",
+            f"--cli-input-json file://{rulesFile})",
+            "",
+            "if [[ $? -eq 0 ]]; then",
+            '  RULE_COUNT=$(echo "$RESPONSE" | jq \'.SecurityGroupRules | length\')',
+            f'  echo "Successfully created $RULE_COUNT rule(s) for {groupName}"',
+            'else',
+            f'  echo "Warning: Could not add rules to {groupName}"',
+            '  echo "$RESPONSE"',
+            'fi',
+            ""
         ]
 
-        for rule in ingressRules:
-            ipRanges = [{"CidrIp":cidr, "Description":rule["description"]} for cidr in rule["cidrs"]] #generate the rules
-            ipPermission = {
-                "IpProtocol":rule["protocol"],
-                "FromPort":rule["from_port"],
-                "ToPort":rule["to_port"],
-                "IpRanges":ipRanges
-            }
-            ipPermissionJSON = json.dumps([ipPermission]) #--ipPermission needs a json object, so explode it
-            bash += [
-                "",
-                f'#Rules for {rule["description"]}',
-                '#pipe the output to see how many rules are created - full output is way too large',
-                f'echo "Creating rules for {rule["description"]}"', #apply the rules
-                'SG_OUT=$(aws ec2 authorize-security-group-ingress \\',
-                '  --group-id "$GROUP_ID" \\',
-                f"  --ip-permissions '{ipPermissionJSON}' \\",
-                "  --query 'SecurityGroupRules | length(@)' \\",
-                '  --output text)',
-                'echo "$SG_OUT rules created"'
-            ]
+    bash.append("echo \"All groups processed.\"")
 
-        #bash += [ can't remake egress allow all if it already exists
-        #    "",
-        #    'echo "allowing all egress.."',
-        #    'aws ec2 authorize-security-group-egress \\',
-        #    '  --group-id "$GROUP_ID" \\',
-        #    '  --protocol -1 \\',
-        #    '  --cidr 0.0.0.0/0 \\',
-        #]
+    #write script to file
+    fileName = SG_JSON[0]["Tags"][0]["Value"] + "_SGs.sh" #grabs the name we tag the security groups with - the name of the FW policy
+    with open(fileName, 'w', newline="\n") as f:
+        f.write("\n".join(bash))
 
-        bash += [""]
+def formatTagSpecifications(tags): #for use in CLI
+    tagParts = [f"{{Key={tag['Key']},Value={tag['Value']}}}" for tag in tags]
+    tagString = f"'ResourceType=security-group,Tags=[{','.join(tagParts)}]'"
+    return tagString
 
-
-    if output_file:
-        with open(output_file, "w", newline="\n") as f: #write the bash script
-            f.write("\n".join(bash))
-    else:
-        print('\n'.join(bash)) #print every line on new line
-
-def createAWSbyAPI(
-        policy: Policy,
-        writeOut = None,
-):
+def createAWSbyAPI(SG_JSON):
     import boto3  #package for AWS API
+    import botocore.exceptions
 
-    from helpers.cloud import getVPCName  #needed so rule CIDRs only match their VPC
+    ec2 = boto3.client('ec2') #create connection to AWS
 
-    ec2 = boto3.client('ec2')
-
-    ingressRules, egressRules = createRules(policy, "api") #no matter the VPC the source rules will be the same so make them before the loop
-
-    for vpc in policy.VPCs: #step through VPCs identified for rule
-        vpcName = getVPCName(vpc) #we want unique sg names, so append the vpcID to the policy name (or use the VPCid if no name)
-        if vpcName:
-            sg_name = f"{policy.name}_{vpcName}"
-        else:
-            sg_name = f"{policy.name}_{vpc}"
-
-        if not writeOut:
-            response = ec2.describe_security_groups( #look for a security group in this vpc with the same name
-                Filters = [
-                    {'Name': 'group-name', 'Values':[sg_name]},
-                    {'Name': 'vpc-id', 'Values': [vpc]}
-                ]
-            )
-            if response['SecurityGroups']:
-                SGid = response['SecurityGroups'][0]['GroupId'] #if matching security group is found, save its ID for use in rules
-                print(f"Found security group {sg_name} in {vpc} with ID {SGid}; using for rule placement")
-            else:
-                response = ec2.create_security_group( #create new security group to place rules in based on VPC
-                    GroupName = sg_name,
-                    Description = f"Security group for policy {policy.name}, built from firewall",
-                    VpcId = vpc,
-                    TagSpecifications=[
-                        {
-                            'ResourceType':'security-group',
-                            'Tags': [
-                                {
-                                    'Key':'firewall_policy',
-                                    'Value': policy.name
-                                }
-                            ]
-                        }
+    for sg in SG_JSON: #step through security groups
+            try:
+                existing_SGs = ec2.describe_security_groups( #grab any existing SGs with this name in this VPC
+                    Filters = [
+                        {'Name': 'group-name', 'Values': [sg['GroupName']]},
+                        {'Name': 'vpc-id', 'Values': [sg['VpcId']]}
                     ]
                 )
-                SGid = response['GroupId'] #get the sg ID now that it's created, for use in attaching rule set
-                print(f"Created new Security Group {SGid} with name {sg_name}")
 
-            response = ec2.authorize_security_group_ingress( #create ingress rules
-                GroupId = SGid,
-                IpPermissions = ingressRules
-            )
-            print(f"Created ingress rules for {SGid}")
+                if existing_SGs['SecurityGroups']: #if any of the existing ones match what we're about to make
+                    sgID = existing_SGs['SecurityGroups'][0]['GroupId'] # reuse the ID
+                    print(f"Re-using existing security group {sg['GroupName']} with ID {sgID} for {sg['VpcId']}")
+                else: #otherwise make a new SG
+                    response = ec2.create_security_group(
+                        GroupName=sg['GroupName'],
+                        Description=sg['Description'],
+                        VpcId=sg['VpcId'],
+                        TagSpecifications=[{
+                            'ResourceType': 'security-group',
+                            'Tags': sg['Tags']
+                        }]
+                    )
 
-            #can't duplicate egress rules, default allow all exists - keeping it here for later functionality
-            #ec2.authorize_security_group_egress(
-            #    GroupId = SGid,
-            #    IpPermissions = egressRules
-            #)
+                sgID = response['GroupId'] #save the new SG ID and let the console know
+                print(f"Created security group {sg['GroupName']} as {sgID}")
 
-        if writeOut:
-            import json
-            print(f"Printing simulated output for security group {sg_name}")
-            print(f"Ingress rules: {json.dumps(ingressRules, indent=5)}")
-            print(f"Egress rules {json.dumps(egressRules, indent=5)}")
+                #add ingress rules to SG
+                ingressResponse = ec2.authorize_security_group_ingress(
+                    GroupId=sgID,
+                    IpPermissions=sg['IpPermissions']
+                )
 
+                if ingressResponse.get('Return',False): #if we didn't get any errors
+                    print(f"Added {len(sg['IpPermissions'])} ingress rules to {sgID}")
+                else:
+                    print(f"No rules were added to SG {sgID} — possibly already present")
 
-def generateAWS_TF(
-    policy: Policy,
-    output_file = None
-):
+            except botocore.exceptions.ClientError as e: #if we raised some exceptions
+                if 'InvalidPermission.Duplicate' in str(e):
+                    print(f"Some or all rules already exist in SG {sg['GroupName']}")
+                else:
+                    print(f"Error processing SG {sg['GroupName']}: {e}")
+
+def generateAWS_TF(SG_JSON):
     import terrascript
-    from terrascript import resource
+    from terrascript.aws.r import aws_security_group
 
-    from helpers.cloud import getVPCName  #needed so rule CIDRs only match their VPC
-    config = terrascript.Terrascript()
+    config = terrascript.Terrascript() #initialize terrascript
 
-    ingressRules, egressRules = createRules(policy, "tf") #no matter the VPC the source rules will be the same so make them before the loop
+    for sg in SG_JSON: #step through groups
+        ingressRules = []
 
-    for vpc in policy.VPCs:
-        vpcName = getVPCName(vpc) #terrascript requires unique sg names, so append the vpcID to the policy name (or use the VPCid if no name)
-        if vpcName:
-            sg_name = f"{policy.name}_{vpcName}"
-        else:
-            sg_name = f"{policy.name}_{vpc}"
+        #group IP permissions by description (the service/protocol)
+        for rule in sg["IpPermissions"]:
+            description = rule["IpRanges"][0]["Description"]
+            cidrs = [r["CidrIp"] for r in rule["IpRanges"]]
+            ingressRules.append({ #rebuild the IpPermissions object with each matching CIDR
+                "from_port": rule["FromPort"],
+                "to_port": rule["ToPort"],
+                "protocol": rule["IpProtocol"],
+                "cidr_blocks": cidrs,
+                "ipv6_cidr_blocks": [],
+                "prefix_list_ids": [],
+                "security_groups": [],
+                "self": "false",
+                "description": description
+            })
 
-        sg = resource.aws_security_group( #build security group
-            sg_name,
-            name = policy.name,
-            description = f"Security group for policy {policy.name}, built from firewall",
-            vpc_id = vpc,
-            ingress = ingressRules,
-            egress = egressRules,
-            tags = {"firewall_policy": policy.name}
+        resource = aws_security_group( #build the group using the above groupings
+            sg["GroupName"],
+            name=sg["GroupName"],
+            description=sg["Description"],
+            vpc_id=sg["VpcId"],
+            ingress=ingressRules,
+            tags={tag["Key"]: tag["Value"] for tag in sg["Tags"] if tag["Key"] != "Name"}
         )
 
-        config += sg #add security group to file
+        config += resource #add to config
 
-    if output_file: #if we've designated a file name write to it, otherwise print config to console
-        with open(output_file, "w") as f:
-            f.write(str(config))
-    else:
-        print(str(config))
+    #write to file
+    fileName = SG_JSON[0]["Tags"][0]["Value"] + ".tf.json" #grabs the name we tag the security groups with - the name of the FW policy
+    with open(f'{fileName}','w') as f:
+        f.write(str(config))
+    print(f"Terraform config written to {fileName}")
+
