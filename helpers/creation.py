@@ -1,4 +1,4 @@
-def generateAWS_CLI(SG_JSON, scriptPath="create_SGs.sh"):
+def generateAWS_CLI(SG_JSON):
     import json
 
     bash = [ #start bash file with shebang error settings
@@ -61,10 +61,9 @@ def generateAWS_CLI(SG_JSON, scriptPath="create_SGs.sh"):
     bash.append("echo \"All groups processed.\"")
 
     #write script to file
-    with open(scriptPath, 'w', newline="\n") as f:
+    fileName = SG_JSON[0]["Tags"][0]["Value"] + "_SGs.sh" #grabs the name we tag the security groups with - the name of the FW policy
+    with open(fileName, 'w', newline="\n") as f:
         f.write("\n".join(bash))
-
-    print(f"Bash script written to {scriptPath}")
 
 def formatTagSpecifications(tags): #for use in CLI
     tagParts = [f"{{Key={tag['Key']},Value={tag['Value']}}}" for tag in tags]
@@ -120,41 +119,45 @@ def createAWSbyAPI(SG_JSON):
                 else:
                     print(f"Error processing SG {sg['GroupName']}: {e}")
 
-'''
-def generateAWS_TF(
-    policy: Policy,
-    output_file = None
-):
+def generateAWS_TF(SG_JSON):
     import terrascript
-    from terrascript import resource
+    from terrascript.aws.r import aws_security_group
 
-    from helpers.cloud import getVPCName  #needed so rule CIDRs only match their VPC
-    config = terrascript.Terrascript()
+    config = terrascript.Terrascript() #initialize terrascript
 
-    ingressRules, egressRules = createRules(policy, "tf") #no matter the VPC the source rules will be the same so make them before the loop
+    for sg in SG_JSON: #step through groups
+        ingressRules = []
 
-    for vpc in policy.VPCs:
-        vpcName = getVPCName(vpc) #terrascript requires unique sg names, so append the vpcID to the policy name (or use the VPCid if no name)
-        if vpcName:
-            sg_name = f"{policy.name}_{vpcName}"
-        else:
-            sg_name = f"{policy.name}_{vpc}"
+        #group IP permissions by description (the service/protocol)
+        for rule in sg["IpPermissions"]:
+            description = rule["IpRanges"][0]["Description"]
+            cidrs = [r["CidrIp"] for r in rule["IpRanges"]]
+            ingressRules.append({ #rebuild the IpPermissions object with each matching CIDR
+                "from_port": rule["FromPort"],
+                "to_port": rule["ToPort"],
+                "protocol": rule["IpProtocol"],
+                "cidr_blocks": cidrs,
+                "ipv6_cidr_blocks": [],
+                "prefix_list_ids": [],
+                "security_groups": [],
+                "self": "false",
+                "description": description
+            })
 
-        sg = resource.aws_security_group( #build security group
-            sg_name,
-            name = policy.name,
-            description = f"Security group for policy {policy.name}, built from firewall",
-            vpc_id = vpc,
-            ingress = ingressRules,
-            egress = egressRules,
-            tags = {"firewall_policy": policy.name}
+        resource = aws_security_group( #build the group using the above groupings
+            sg["GroupName"],
+            name=sg["GroupName"],
+            description=sg["Description"],
+            vpc_id=sg["VpcId"],
+            ingress=ingressRules,
+            tags={tag["Key"]: tag["Value"] for tag in sg["Tags"] if tag["Key"] != "Name"}
         )
 
-        config += sg #add security group to file
+        config += resource #add to config
 
-    if output_file: #if we've designated a file name write to it, otherwise print config to console
-        with open(output_file, "w") as f:
-            f.write(str(config))
-    else:
-        print(str(config))
-'''
+    #write to file
+    fileName = SG_JSON[0]["Tags"][0]["Value"] + ".tf.json" #grabs the name we tag the security groups with - the name of the FW policy
+    with open(f'{fileName}','w') as f:
+        f.write(str(config))
+    print(f"Terraform config written to {fileName}")
+

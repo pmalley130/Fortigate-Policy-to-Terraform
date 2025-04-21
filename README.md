@@ -1,15 +1,21 @@
 # Fortigate-Policy-to-Terraform
 Scripts to convert a Fortigate firewall policy to Network Security Groups. Several assumptions are made:
 - The original policy has a destination in the cloud, so only ingress is handled (egress stays as allow all)
-- The firewall policy is only for one VPC
+- security groups are attached at the VPC level
+  - in the future I may scan "destinations" in the firewall policy to determine if the destination is a /32 and therefore attach at the EC2/instance level instead
 - No IPv6 involvement
 - Region is set by environment
 
+## Usage
+- Run "python main.py" and follow the prompts.
+  - Bash and Terraform options generate files (using the fw policy name) used to create the security groups
+  - API option directly creates the security groups
+
+
 ## To-do
 - take arguments in main for creation type (-tf; -api; -cli, policy name)
-- refactor into creating json to describe sg and rules
-    - json creation, API, CLI done, only TF remaining
 - logic to handle any/all object in source/destination of rule
+- support creating SG for instances OR VPC
 - get egress rule from vpc and copy/recreate them instead of defaulting to allow all
 - if no environment, ask for missing details at runtime
 - support policy json file as argument
