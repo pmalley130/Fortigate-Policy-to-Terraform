@@ -8,6 +8,7 @@ Scripts to convert a Fortigate firewall policy to Network Security Groups. Sever
 ## To-do
 - take arguments in main for creation type (-tf; -api; -cli, policy name)
 - refactor into creating json to describe sg and rules
+    - json creation, API, CLI done, only TF remaining
 - logic to handle any/all object in source/destination of rule
 - get egress rule from vpc and copy/recreate them instead of defaulting to allow all
 - if no environment, ask for missing details at runtime

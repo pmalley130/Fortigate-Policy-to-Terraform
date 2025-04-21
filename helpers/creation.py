@@ -1,107 +1,76 @@
-from helpers.classes import Policy
-
-
-def generateAWS_CLI(
-        policy: Policy,
-        output_file = None
-):
-    pass
-'''
+def generateAWS_CLI(SG_JSON, scriptPath="create_SGs.sh"):
     import json
 
-    from helpers.cloud import getVPCName
-
-    bash = [ #start bash file with shebang and nl
+    bash = [ #start bash file with shebang error settings
         "#!/usr/bin/env bash",
         "",
+        "set -euo pipefail",
     ]
 
-    ingressRules, egressRules = createRules(policy, "cli") #make ingress and egress rules in the format needed for bash
+    rulesFile = "IpPermissions.json"
 
-    for vpc in policy.VPCs:
-        vpcName = getVPCName(vpc) #we want unique sg names, so append the vpcID to the policy name (or use the VPCid if no name)
-        if vpcName:
-            sg_name = f"{policy.name}_{vpcName}"
-        else:
-            sg_name = f"{policy.name}_{vpc}"
+    for i, sg in enumerate(SG_JSON):
+        groupName = sg['GroupName']
+        description = sg['Description'].replace('"','\\".')
+        vpcID = sg['VpcId']
 
-        description = f"Security group for policy {policy.name}, built from firewall"
+        #AWS CLI is particular about passing tag specifications so we do some weird stuff here
+        tagSpecs = formatTagSpecifications(sg['Tags'])
 
-        bash += [ #add the lines needed for the bash script - first we make the security group so it can be referenced in actual rules
-            f'#SECURITY GROUP CONFIGURATION FOR {vpcName}', #set the variables
-            f'GROUP_NAME="{sg_name}"',
-            f'DESCRIPTION="{description}"',
-            f'VPC_ID="{vpc}"',
-            f'FIREWALL_POLICY_NAME="{policy.name}"',
+        if i == 0:
+             #Write rules JSON file, reused in each SG so write once
+            rulesData = {"IpPermissions": sg['IpPermissions']}
+            with open(rulesFile, 'w') as rf:
+                json.dump(rulesData, rf, indent=2)
+            print(f"Ingress rules JSON written to {rulesFile}")
+
+
+        bash += [
+            f"echo \"Processing security group {groupName}\"",
+            "SG_ID=$(aws ec2 describe-security-groups \\", #attempt to find existing security group
+            f"--filters Name=group-name,Values={groupName} Name=vpc-id,Values={vpcID} \\",
+            "--query 'SecurityGroups[0].GroupId' --output text || true)",
             "",
-            f'#Check for existing security group {sg_name}, if exists, save to id GROUP_ID', #check for existing sg
-            'GROUP_ID=$(aws ec2 describe-security-groups \\',
-            '  --filters Name=group-name,Values="$GROUP_NAME" Name=vpc-id,Values="$VPC_ID" \\',
-            '  --query "SecurityGroups[0].GroupId" \\',
-            '  --output text)',
-            "",
-            'if [[ "$GROUP_ID" == "None" ]]; then', #if sg exists..
-            f'  #Security group {sg_name} not found in {vpc}, so creating and tagging one',
-            f'  echo "Creating security group for {vpc}"', #make the group
-            '  GROUP_ID=$(aws ec2 create-security-group \\',
-            '    --group-name "$GROUP_NAME" \\',
-            '    --description "$DESCRIPTION" \\',
-            '    --vpc-id "$VPC_ID" \\',
-            "    --query 'GroupId' \\",
-            '    --output text)',
-            "",
-            '  #Tag new group',
-            '  echo "Tagging new security group "$GROUP_ID"..."', #tag the group
-            '  aws ec2 create-tags \\',
-            '    --resources "$GROUP_ID" \\',
-            '    --tags Key=firewall_policy:name,Value="$FIREWALL_POLICY_NAME"',
+            "if [ \"$SG_ID\" == \"None\" ] || [ -z \"$SG_ID\" ]; then", #if we don't find the  group
+            f"  echo \"Creating security group {groupName}\"",
+            "  SG_ID=$(aws ec2 create-security-group \\", #create new group
+            f"--group-name \"{groupName}\" \\",
+            f"--description \"{description}\" \\",
+            f"--vpc-id {vpcID} \\",
+            f"--tag-specifications {tagSpecs} \\",
+            "--query 'GroupId' --output text)",
             "else",
-            f'  echo "Found security group {sg_name} in {vpc} with ID: $GROUP_ID"', #state that group exists
-            'fi',
+            f"  echo \"Re-using existing security group {groupName} (ID: $SG_ID)\"",#otherwise re-use existing
+            "fi",
             "",
-            'echo "adding ingress rules"'
+            "echo \"Attaching ingress rules to $SG_ID\"", #attach rules file to new SG
+            "RESPONSE=$(aws ec2 authorize-security-group-ingress \\",
+            "--group-id $SG_ID \\",
+            f"--cli-input-json file://{rulesFile})",
+            "",
+            "if [[ $? -eq 0 ]]; then",
+            '  RULE_COUNT=$(echo "$RESPONSE" | jq \'.SecurityGroupRules | length\')',
+            f'  echo "Successfully created $RULE_COUNT rule(s) for {groupName}"',
+            'else',
+            f'  echo "Warning: Could not add rules to {groupName}"',
+            '  echo "$RESPONSE"',
+            'fi',
+            ""
         ]
 
-        for rule in ingressRules:
-            ipRanges = [{"CidrIp":cidr, "Description":rule["description"]} for cidr in rule["cidrs"]] #generate the rules
-            ipPermission = {
-                "IpProtocol":rule["protocol"],
-                "FromPort":rule["from_port"],
-                "ToPort":rule["to_port"],
-                "IpRanges":ipRanges
-            }
-            ipPermissionJSON = json.dumps([ipPermission]) #--ipPermission needs a json object, so explode it
-            bash += [
-                "",
-                f'#Rules for {rule["description"]}',
-                '#pipe the output to see how many rules are created - full output is way too large',
-                f'echo "Creating rules for {rule["description"]}"', #apply the rules
-                'SG_OUT=$(aws ec2 authorize-security-group-ingress \\',
-                '  --group-id "$GROUP_ID" \\',
-                f"  --ip-permissions '{ipPermissionJSON}' \\",
-                "  --query 'SecurityGroupRules | length(@)' \\",
-                '  --output text)',
-                'echo "$SG_OUT rules created"'
-            ]
+    bash.append("echo \"All groups processed.\"")
 
-        #bash += [ can't remake egress allow all if it already exists
-        #    "",
-        #    'echo "allowing all egress.."',
-        #    'aws ec2 authorize-security-group-egress \\',
-        #    '  --group-id "$GROUP_ID" \\',
-        #    '  --protocol -1 \\',
-        #    '  --cidr 0.0.0.0/0 \\',
-        #]
+    #write script to file
+    with open(scriptPath, 'w', newline="\n") as f:
+        f.write("\n".join(bash))
 
-        bash += [""]
+    print(f"Bash script written to {scriptPath}")
 
+def formatTagSpecifications(tags): #for use in CLI
+    tagParts = [f"{{Key={tag['Key']},Value={tag['Value']}}}" for tag in tags]
+    tagString = f"'ResourceType=security-group,Tags=[{','.join(tagParts)}]'"
+    return tagString
 
-    if output_file:
-        with open(output_file, "w", newline="\n") as f: #write the bash script
-            f.write("\n".join(bash))
-    else:
-        print('\n'.join(bash)) #print every line on new line
-'''
 def createAWSbyAPI(SG_JSON):
     import boto3  #package for AWS API
     import botocore.exceptions
