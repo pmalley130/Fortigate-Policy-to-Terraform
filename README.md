@@ -14,7 +14,7 @@ Several assumptions are made:
 - Region is set by environment
 
 ## Usage
-- python generate_sg.py [policy_name] [method] [--print-json]
+`python generate_sg.py [policy_name] [method] [--print-json]`
 
 ### Arguments
 | Argument  | Type | Description |
@@ -40,7 +40,13 @@ python generate_sg.py MyPolicy --print-json
 ```
 python generate_sg.py
 ```
-
+## Dependencies
+```
+boto3
+fortigate-api
+terrascript
+jq (if running CLI option)
+```
 ## To-do
 - logic to handle any/all object in source/destination of rule
 - support creating SG for instances OR VPC
@@ -50,10 +56,3 @@ python generate_sg.py
 - support IPv6
 - support other cloud providers
 
-## Dependencies
-```
-boto3
-fortigate-api
-terrascript
-jq (if running CLI option)
-```
