@@ -3,7 +3,8 @@
 This script generates or deploys AWS Security Groups based on a named Fortigate Firewall Policy. You can use it to:
 - Generate Terraform JSON (`TF`)
 - Deploy Security Groups via the AWS API (`API`)
-- Generate Bash CLI scripts (`CLI`)
+- Generate Bash CLI script (`CLI`)
+  - The CLI option also generates an "IpPermissions.json" file that must be in the same folder as the generated script when it is ran.   
 - Optionally print the generated JSON to the console
 
 Several assumptions are made:
