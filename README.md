@@ -4,15 +4,16 @@ This script generates or deploys AWS Security Groups based on a named Fortigate 
 - Generate Terraform JSON (`TF`)
 - Deploy Security Groups via the AWS API (`API`)
 - Generate Bash CLI script (`CLI`)
-  - The CLI option also generates an "IpPermissions.json" file that must be in the same folder as the generated script when it is ran.   
+  - The CLI option also generates an "IpPermissions.json" file that must be in the same folder as the generated script when it is run.   
 - Optionally print the generated JSON to the console
 
-Several assumptions are made:
-- The original policy has a destination in the cloud, so only ingress is handled (egress stays as allow all)
+This is uploaded as a pared down portfolio demo, as such, some changes have been made:
+- only ingress is handled (egress stays as allow all)
 - security groups are attached at the VPC level
-  - in the future I may scan "destinations" in the firewall policy to determine if the destination is a /32 and therefore attach at the EC2/instance level instead
+  - in practical application, security groups would be applied to the cloud resource that matches the IP, found via scanning interfaces
 - No IPv6 involvement
 - Region is set by environment
+- No web app front end
 
 ## Usage
 `python generate_sg.py [policy_name] [method] [--print-json]`
